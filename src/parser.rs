@@ -75,7 +75,7 @@ impl MathParser {
             let mut parser = Self::from_tokens(&self.original_string, tok_list);
             return parser.parse().with_context(|| {
                 let error = util::error_message(&self.original_string, start, end);
-                return anyhow!("while evaluating brackets{error}");
+                anyhow!("while evaluating brackets{error}")
             });
         } else if let Some(tokenizer::MathToken::Num(_, _)) = self.peek() {
             let bb = self.pop();
@@ -88,14 +88,13 @@ impl MathParser {
                     });
                 }
                 return Ok(ops::MathOp::Num(x));
-            } else {
-                panic!("Should never happen {bb:?}");
             }
+            panic!("Should never happen {bb:?}");
         }
-        let pos = self
-            .peek()
-            .map(|x| x.position())
-            .unwrap_or(self.original_string.len() - 1);
+        let pos = self.peek().map_or(
+            self.original_string.len() - 1,
+            tokenizer::MathToken::position,
+        );
         let error = util::error_message(&self.original_string, pos, pos);
         Err(anyhow!("expected number or open bracket{error}"))
     }
@@ -193,7 +192,7 @@ impl MathParser {
             let msg = util::error_message(&self.original_string, idx, idx);
             return Err(anyhow!("unexpected sequence{msg}"));
         }
-        return out;
+        out
     }
 }
 
@@ -209,7 +208,7 @@ impl Display for MathParser {
                 tokenizer::MathToken::Exp(_) => " ^ ".to_string(),
                 tokenizer::MathToken::Open(_) => "(".to_string(),
                 tokenizer::MathToken::Close(_) => ")".to_string(),
-                tokenizer::MathToken::Num(_, x) => format!("{}", x),
+                tokenizer::MathToken::Num(_, x) => format!("{x}"),
             });
         }
 

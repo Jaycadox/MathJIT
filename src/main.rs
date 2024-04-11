@@ -5,7 +5,7 @@ mod tokenizer;
 mod util;
 
 use anyhow::anyhow;
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, io::Write, str::FromStr};
 
 use crate::eval::{ast_interpret::AstInterpreter, llvm::LlvmJit, MathEval};
 use clap::Parser;
@@ -17,7 +17,7 @@ use clap::Parser;
     about = "MathJIT -- Just-In-Time mathematical evaluator"
 )]
 struct Args {
-    math_expr: String,
+    math_expr: Option<String>,
     #[clap(short, long, default_value_t = Mode::Interpret)]
     mode: Mode,
     #[clap(short, long)]
@@ -26,7 +26,7 @@ struct Args {
     timings: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum Mode {
     Interpret,
     Jit,
@@ -38,8 +38,8 @@ impl Display for Mode {
             f,
             "{}",
             match self {
-                Mode::Interpret => "interpret",
-                Mode::Jit => "jit",
+                Mode::Interpret => "Interpreter",
+                Mode::Jit => "JIT",
             }
         )
     }
@@ -50,29 +50,49 @@ impl FromStr for Mode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "jit" | "j" => Ok(Mode::Jit),
-            "interpret" | "i" | "interpreter" => Ok(Mode::Interpret),
+            "jit" | "j" | "JIT" => Ok(Mode::Jit),
+            "interpret" | "i" | "interpreter" | "Interpreter" => Ok(Mode::Interpret),
             _ => Err(anyhow!("invalid selection, wanted 'jit' or 'interpret'")),
         }
     }
 }
-
 fn main() {
     let args = Args::parse();
+    if let Some(expr) = args.math_expr {
+        if let Some(val) = run_repl_expr(&expr, args.mode, args.verbose, args.timings) {
+            println!("{val}");
+        }
+        return;
+    }
+
+    println!("MathJIT ({} mode)", args.mode);
+    loop {
+        print!("> ");
+        let _ = std::io::stdout().flush();
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_line(&mut buf)
+            .expect("Failed to read line");
+        if let Some(val) = run_repl_expr(buf.trim(), args.mode, args.verbose, args.timings) {
+            println!("{val}");
+        }
+    }
+}
+fn run_repl_expr(math_expr: &str, mode: Mode, verbose: bool, timings: bool) -> Option<f64> {
     let tokenize_start = std::time::Instant::now();
-    let mut parser = match parser::MathParser::new(&args.math_expr) {
+    let mut parser = match parser::MathParser::new(math_expr) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("Tokenizer error:");
             for cause in e.chain() {
                 eprintln!("{cause}");
             }
-            std::process::exit(1);
+            return None;
         }
     };
     let tokenize_end = std::time::Instant::now();
 
-    let parse_start = tokenize_end.clone();
+    let parse_start = tokenize_end;
     let ops = match parser.parse() {
         Ok(x) => x,
         Err(e) => {
@@ -80,24 +100,24 @@ fn main() {
             for cause in e.chain() {
                 eprintln!("{cause}");
             }
-            std::process::exit(1);
+            return None;
         }
     };
     let parse_end = std::time::Instant::now();
 
-    let eval_start = parse_end.clone();
+    let eval_start = parse_end;
     let mut jit_timings = None;
-    match args.mode {
-        Mode::Interpret => {
-            println!("{}", AstInterpreter.eval(&ops).unwrap());
-        }
+    let value = match mode {
+        Mode::Interpret => AstInterpreter.eval(&ops).unwrap(),
         Mode::Jit => {
-            let mut llvm = LlvmJit::new(args.verbose);
-            println!("{}", llvm.eval(&ops).unwrap());
+            let mut llvm = LlvmJit::new(verbose);
+            let val = llvm.eval(&ops).unwrap();
             jit_timings = Some((llvm.compile_ms, llvm.run_ms));
+            val
         }
-    }
-    if args.timings {
+    };
+
+    if timings {
         let eval_end = std::time::Instant::now();
         let total_time = eval_end.duration_since(tokenize_start).as_secs_f64() * 1000.0;
 
@@ -129,4 +149,5 @@ fn main() {
             );
         }
     }
+    Some(value)
 }

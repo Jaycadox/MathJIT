@@ -64,14 +64,14 @@ impl MathToken {
     }
     pub fn position(&self) -> usize {
         *match self {
-            MathToken::Add(x) => x,
-            MathToken::Sub(x) => x,
-            MathToken::Div(x) => x,
-            MathToken::Mul(x) => x,
-            MathToken::Open(x) => x,
-            MathToken::Close(x) => x,
-            MathToken::Exp(x) => x,
-            MathToken::Num(x, _) => x,
+            MathToken::Add(x)
+            | MathToken::Sub(x)
+            | MathToken::Mul(x)
+            | MathToken::Div(x)
+            | MathToken::Exp(x)
+            | MathToken::Open(x)
+            | MathToken::Close(x)
+            | MathToken::Num(x, _) => x,
         }
     }
 }
