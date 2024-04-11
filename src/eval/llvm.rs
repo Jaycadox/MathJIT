@@ -9,24 +9,15 @@ use inkwell::{
     OptimizationLevel,
 };
 
-use crate::ops::MathOp;
+use crate::{ops::MathOp, timings::Timings};
 
-use super::MathEval;
+use super::Eval;
 
 pub struct LlvmJit {
     pub verbose: bool,
     pub compile_ms: f64,
     pub run_ms: f64,
-}
-
-impl LlvmJit {
-    pub fn new(verbose: bool) -> Self {
-        Self {
-            verbose,
-            compile_ms: 0f64,
-            run_ms: 0f64,
-        }
-    }
+    context: Context,
 }
 
 type EvalFunc = unsafe extern "C" fn() -> f64;
@@ -130,13 +121,8 @@ impl<'ctx> CodeGen<'ctx> {
     }
 }
 
-impl MathEval for LlvmJit {
-    fn eval(&mut self, ops: &crate::ops::MathOp) -> Option<f64> {
-        let compile_start = std::time::Instant::now();
-        if self.verbose {
-            println!("--- AST ---\n{ops:?}");
-        }
-
+impl Eval for LlvmJit {
+    fn new(verbose: bool) -> Self {
         let config = InitializationConfig {
             asm_printer: true,
             ..Default::default()
@@ -144,31 +130,44 @@ impl MathEval for LlvmJit {
 
         Target::initialize_native(&config).expect("failed to initialize target");
         let context = Context::create();
-        let module = context.create_module("jit");
+        Self {
+            verbose,
+            compile_ms: 0f64,
+            run_ms: 0f64,
+            context,
+        }
+    }
+
+    fn eval(&mut self, ops: &crate::ops::MathOp) -> Option<(f64, Timings)> {
+        let mut timings = Timings::start();
+        if self.verbose {
+            println!("--- AST ---\n{ops:?}");
+        }
+
+        let module = self.context.create_module("jit");
         let execution_engine = module
             .create_jit_execution_engine(inkwell::OptimizationLevel::Aggressive)
             .expect("Failed to create execution engine");
 
         let codegen = CodeGen {
-            context: &context,
+            context: &self.context,
             module,
-            builder: context.create_builder(),
+            builder: self.context.create_builder(),
             execution_engine,
         };
+
+        timings.lap("Start");
         let eval = codegen
             .compile(ops, self.verbose)
             .expect("Failed to JIT compile");
+        timings.lap("Compile");
 
         if self.verbose {
             println!("--- Assembly ---\n{}", codegen.get_assembly());
             println!("-- Result --");
         }
-        let compile_end = std::time::Instant::now();
-        let ret = Some(unsafe { eval.call() });
-        let runtime_end = std::time::Instant::now();
-        self.compile_ms = compile_end.duration_since(compile_start).as_secs_f64() * 1000.0;
-        self.run_ms = runtime_end.duration_since(compile_end).as_secs_f64() * 1000.0;
-
-        ret
+        let val = unsafe { eval.call() };
+        timings.lap("Exec");
+        Some((val, timings))
     }
 }

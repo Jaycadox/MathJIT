@@ -1,17 +1,31 @@
-use crate::ops;
+use crate::{
+    ops::{self, MathOp},
+    timings::Timings,
+};
+
+use super::Eval;
 
 pub struct AstInterpreter;
 
-impl super::MathEval for AstInterpreter {
-    fn eval(&mut self, ops: &ops::MathOp) -> Option<f64> {
-        match ops {
-            ops::MathOp::Add { lhs, rhs } => Some(self.eval(lhs)? + self.eval(rhs)?),
-            ops::MathOp::Sub { lhs, rhs } => Some(self.eval(lhs)? - self.eval(rhs)?),
-            ops::MathOp::Mul { lhs, rhs } => Some(self.eval(lhs)? * self.eval(rhs)?),
-            ops::MathOp::Div { lhs, rhs } => Some(self.eval(lhs)? / self.eval(rhs)?),
-            ops::MathOp::Exp { lhs, rhs } => Some(self.eval(lhs)?.powf(self.eval(rhs)?)),
-            ops::MathOp::Num(x) => Some(*x),
-            ops::MathOp::Neg(x) => Some(-self.eval(x)?),
-        }
+impl Eval for AstInterpreter {
+    fn eval(&mut self, ops: &MathOp) -> Option<(f64, Timings)> {
+        let timings = Timings::start();
+        Some((
+            match ops {
+                ops::MathOp::Add { lhs, rhs } => self.eval(lhs)?.0 + self.eval(rhs)?.0,
+                ops::MathOp::Sub { lhs, rhs } => self.eval(lhs)?.0 - self.eval(rhs)?.0,
+                ops::MathOp::Mul { lhs, rhs } => self.eval(lhs)?.0 * self.eval(rhs)?.0,
+                ops::MathOp::Div { lhs, rhs } => self.eval(lhs)?.0 / self.eval(rhs)?.0,
+                ops::MathOp::Exp { lhs, rhs } => self.eval(lhs)?.0.powf(self.eval(rhs)?.0),
+                ops::MathOp::Num(x) => *x,
+                ops::MathOp::Neg(x) => -self.eval(x)?.0,
+            },
+            timings,
+        ))
+    }
+
+    fn new(verbose: bool) -> Self {
+        let _ = verbose;
+        Self
     }
 }
