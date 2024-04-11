@@ -27,6 +27,10 @@ impl MathToken {
                 continue;
             }
 
+            if current == '(' && matches!(tokens.last(), Some(MathToken::Num(_, _))) {
+                tokens.push(MathToken::Mul(current_idx));
+            }
+
             if let Some(trivial) = match current {
                 '+' => Some(MathToken::Add(current_idx)),
                 '-' => Some(MathToken::Sub(current_idx)),

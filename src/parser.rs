@@ -80,6 +80,13 @@ impl MathParser {
         } else if let Some(tokenizer::MathToken::Num(_, _)) = self.peek() {
             let bb = self.pop();
             if let Some(tokenizer::MathToken::Num(_, x)) = bb {
+                if let Some(tokenizer::MathToken::Open(_)) = self.peek() {
+                    let expr = self.parse_primary()?;
+                    return Ok(ops::MathOp::Mul {
+                        lhs: Box::new(ops::MathOp::Num(x)),
+                        rhs: Box::new(expr),
+                    });
+                }
                 return Ok(ops::MathOp::Num(x));
             } else {
                 panic!("Should never happen {bb:?}");
