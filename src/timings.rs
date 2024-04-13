@@ -15,14 +15,14 @@ impl Timings {
         }
     }
 
-    pub fn lap(&mut self, label: &'static str) {
+    pub fn lap(&mut self, label: &str) {
         let now = Instant::now();
         let taken = now.duration_since(self.last).as_secs_f64() * 1000.0;
         self.last = now;
         self.points.push((label.to_string(), taken));
     }
 
-    pub fn append(&mut self, other: Self, prefix: &'static str) {
+    pub fn append(&mut self, other: Self, prefix: &str) {
         if other.points.is_empty() {
             self.lap(prefix);
         }

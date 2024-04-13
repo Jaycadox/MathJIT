@@ -1,3 +1,5 @@
+use std::{rc::Rc, sync::RwLock};
+
 use crate::{
     ops::MathOp,
     parser::{Function, ParseOutput},
@@ -8,11 +10,11 @@ use super::{Eval, EvalResponse};
 
 pub struct AstInterpreter {
     functions: Vec<Function>,
-    arg_frames: Vec<Vec<f64>>,
+    arg_frames: Rc<RwLock<Vec<Vec<f64>>>>,
 }
 
 impl AstInterpreter {
-    fn inner_eval(&mut self, ops: &MathOp, func: &Function) -> Option<f64> {
+    fn inner_eval(&self, ops: &MathOp, func: &Function) -> Option<f64> {
         Some(match ops {
             MathOp::Add { lhs, rhs } => self.inner_eval(lhs, func)? + self.inner_eval(rhs, func)?,
             MathOp::Sub { lhs, rhs } => self.inner_eval(lhs, func)? - self.inner_eval(rhs, func)?,
@@ -24,25 +26,32 @@ impl AstInterpreter {
             MathOp::Num(x) => *x,
             MathOp::Neg(x) => -self.inner_eval(x, func)?,
             MathOp::Call { name, args } => {
+                // Fill function frame with evaluated arguments
                 let mut frame = Vec::new();
                 for arg in args {
                     let val = self.inner_eval(arg, func)?;
                     frame.push(val);
                 }
-                self.arg_frames.push(frame);
-                let funcs = self.functions.clone();
-                let func = funcs
+
+                // Push function frame and call function
+                self.arg_frames.write().unwrap().push(frame);
+                let func = self
+                    .functions
                     .iter()
                     .find(|x| x.name == *name)
                     .expect("Could not find function");
                 let val = self.inner_eval(&func.body, func)?;
-                self.arg_frames.pop();
+
+                // Pop function frame after function call
+                self.arg_frames.write().unwrap().pop();
                 val
             }
             MathOp::Arg(n) => {
                 if let Some((index, _)) = func.args.iter().enumerate().find(|x| x.1 == n) {
                     *self
                         .arg_frames
+                        .read()
+                        .unwrap()
                         .last()
                         .expect("Could not find function frame")
                         .get(index)
@@ -61,7 +70,7 @@ impl Eval for AstInterpreter {
 
         Self {
             functions: vec![],
-            arg_frames: vec![],
+            arg_frames: Rc::new(RwLock::new(vec![])),
         }
     }
 

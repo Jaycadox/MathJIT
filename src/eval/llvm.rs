@@ -3,6 +3,7 @@ use inkwell::{
     context::Context,
     execution_engine::ExecutionEngine,
     intrinsics::Intrinsic,
+    memory_buffer::MemoryBuffer,
     module::Module,
     targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
     values::{FloatValue, FunctionValue},
@@ -23,15 +24,16 @@ pub struct LlvmJit {
     pub run_ms: f64,
     context: Context,
     functions: Vec<Function>,
+    cached_module: Option<Vec<u8>>,
 }
 
 type EvalFunc = unsafe extern "C" fn() -> f64;
 
 pub struct CodeGen<'a> {
     context: &'a Context,
-    module: &'a Module<'a>,
-    builder: &'a Builder<'a>,
-    execution_engine: &'a ExecutionEngine<'a>,
+    module: Module<'a>,
+    builder: Builder<'a>,
+    execution_engine: ExecutionEngine<'a>,
 }
 
 pub struct FunctionGen<'a, 'b> {
@@ -104,7 +106,7 @@ impl<'a> CodeGen<'a> {
                     Intrinsic::find("llvm.pow.f64").expect("Failed to find llvm.pow.f64 intrinsic");
                 let pow_fn = pow_intrinsic
                     .get_declaration(
-                        self.module,
+                        &self.module,
                         &[
                             self.context.f64_type().into(),
                             self.context.f64_type().into(),
@@ -179,7 +181,7 @@ impl<'a> CodeGen<'a> {
             )
             .unwrap();
         let mem_buf = machine
-            .write_to_memory_buffer(self.module, inkwell::targets::FileType::Assembly)
+            .write_to_memory_buffer(&self.module, inkwell::targets::FileType::Assembly)
             .expect("Failed to get memory buffer");
         let asm = String::from_utf8_lossy(mem_buf.as_slice());
         asm.to_string()
@@ -193,17 +195,25 @@ impl LlvmJit {
         func: &Function,
         timings: &mut Timings,
     ) -> Option<()> {
-        timings.lap("Start");
         codegen
             .compile(func, self.verbose)
             .expect("Failed to JIT compile");
-        timings.lap("Compile");
+        timings.lap(&format!("Codegen({})", func.name));
 
         Some(())
     }
 
-    fn create_codegen(&self) -> CodeGen {
-        let module = Box::leak(Box::new(self.context.create_module("jit")));
+    fn create_codegen(&self, cached_module: &Option<Vec<u8>>) -> CodeGen {
+        let module = if let Some(cached_module) = cached_module.as_ref() {
+            Module::parse_bitcode_from_buffer(
+                &MemoryBuffer::create_from_memory_range(cached_module, "Cached module"),
+                &self.context,
+            )
+            .unwrap()
+        } else {
+            self.context.create_module("jit")
+        };
+
         let execution_engine = module
             .create_jit_execution_engine(inkwell::OptimizationLevel::Aggressive)
             .expect("Failed to create execution engine");
@@ -211,8 +221,8 @@ impl LlvmJit {
         let codegen = CodeGen {
             context: &self.context,
             module,
-            builder: Box::leak(Box::new(self.context.create_builder())),
-            execution_engine: Box::leak(Box::new(execution_engine)),
+            builder: self.context.create_builder(),
+            execution_engine,
         };
         codegen
     }
@@ -233,6 +243,7 @@ impl Eval for LlvmJit {
             run_ms: 0f64,
             context,
             functions: Vec::new(),
+            cached_module: None,
         }
     }
 
@@ -245,7 +256,7 @@ impl Eval for LlvmJit {
         let (functions, exec_last) = match ops {
             ParseOutput::Body(ops) => (
                 vec![Function {
-                    name: format!("__repl__{}", self.functions.len()),
+                    name: "_repl".to_string(),
                     args: vec![],
                     body: ops,
                 }],
@@ -254,18 +265,27 @@ impl Eval for LlvmJit {
             ParseOutput::Functions(funcs) => (funcs, false),
         };
 
+        let mut changed_functions = vec![];
+
         for func in functions {
             if let Some(item) = self.functions.iter_mut().find(|x| x.name == func.name) {
                 *item = func;
+                changed_functions.push(item.name.to_owned());
             } else {
                 self.functions.push(func);
             }
         }
 
         let mut timings = Timings::start();
-        let codegen = self.create_codegen();
+        let codegen = self.create_codegen(&self.cached_module);
+        timings.lap("CreateCodegen");
+
         self.functions
             .iter()
+            .filter(|x| {
+                changed_functions.contains(&x.name)
+                    || codegen.module.get_function(&x.name).is_none()
+            })
             .map(|x| self.compile_function(&codegen, x, &mut timings))
             .collect::<Option<Vec<()>>>()?;
 
@@ -277,16 +297,23 @@ impl Eval for LlvmJit {
 
         if exec_last {
             let last = &self.functions.last().unwrap().name;
-            let val = unsafe {
+            let func = unsafe {
                 codegen
                     .execution_engine
                     .get_function::<EvalFunc>(last)
                     .unwrap()
-                    .call()
+                    .as_raw()
             };
+            timings.lap("LLVMCompile");
+            let val = unsafe { func() };
             timings.lap("Exec");
             return Some((EvalResponse::Value(val), timings));
         }
+
+        let cached = codegen.module.write_bitcode_to_memory().as_slice().to_vec();
+        drop(codegen);
+
+        self.cached_module = Some(cached);
 
         Some((EvalResponse::Ok, timings))
     }
