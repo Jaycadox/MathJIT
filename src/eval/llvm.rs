@@ -313,7 +313,15 @@ impl Eval for LlvmJit {
         let cached = codegen.module.write_bitcode_to_memory().as_slice().to_vec();
         drop(codegen);
 
-        self.cached_module = Some(cached);
+        if changed_functions.is_empty() {
+            self.cached_module = Some(cached);
+        } else {
+            // We skip caching the module so LLVM can rebuild the entire IR with the new version of the func
+            // Ideally, LLVM would provide a: module.remove_function(...)
+            // Perhaps we could map changed functions with a seperate name, and call the new name? (LLVM might provide this through Function.name())
+            // ^ but that might increase compile times for proper evaluations due to unneeded IR, though not caching also increases comp times
+            self.cached_module = None;
+        }
 
         Some((EvalResponse::Ok, timings))
     }

@@ -36,6 +36,10 @@ impl MathParser {
         })
     }
 
+    pub fn tokens(&self) -> &[tokenizer::MathToken] {
+        &self.original_tokens
+    }
+
     fn from_tokens(input: &str, tokens: Vec<tokenizer::MathToken>) -> Self {
         Self {
             tokens: tokens.clone(),

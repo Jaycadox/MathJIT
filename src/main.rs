@@ -8,7 +8,8 @@ mod util;
 use anyhow::anyhow;
 use eval::Eval;
 use parser::ParseOutput;
-use std::{fmt::Display, io::Write, str::FromStr};
+use rustyline::DefaultEditor;
+use std::{fmt::Display, str::FromStr};
 use timings::Timings;
 
 use crate::eval::{ast_interpret::AstInterpreter, llvm::LlvmJit};
@@ -61,7 +62,7 @@ impl FromStr for Mode {
     }
 }
 
-fn into_ops(math_expr: &str) -> Option<(ParseOutput, Timings)> {
+fn into_ops(math_expr: &str, verbose: bool) -> Option<(ParseOutput, Timings)> {
     let mut timings = Timings::start();
     let mut parser = match parser::MathParser::new(math_expr) {
         Ok(x) => x,
@@ -73,6 +74,12 @@ fn into_ops(math_expr: &str) -> Option<(ParseOutput, Timings)> {
             return None;
         }
     };
+
+    if verbose {
+        println!("--- Tokenized --");
+        println!("{:?}", parser.tokens());
+    }
+
     timings.lap("Tokenizer");
 
     let ops = match parser.parse() {
@@ -85,6 +92,12 @@ fn into_ops(math_expr: &str) -> Option<(ParseOutput, Timings)> {
             return None;
         }
     };
+
+    if verbose {
+        println!("--- AST --");
+        println!("{:?}", ops);
+    }
+
     timings.lap("Parser");
     Some((ops, timings))
 }
@@ -117,20 +130,25 @@ fn start_repl_loop<T: Eval>(args: Args, repl_mode: ReplMode) {
         println!("MathJIT ({} mode)", args.mode);
     }
 
+    let mut rl = DefaultEditor::new().unwrap();
+
     let mut repl = T::new(args.verbose);
     loop {
         let input = match repl_mode {
             ReplMode::Single(ref inp) => inp.to_string(),
             ReplMode::Loop => {
-                print!("> ");
-                let _ = std::io::stdout().flush();
-                let mut buf = String::new();
-                std::io::stdin().read_line(&mut buf).unwrap();
-                buf
+                let readline = rl.readline("> ");
+                match readline {
+                    Ok(line) => {
+                        let _ = rl.add_history_entry(line.clone());
+                        line.to_string()
+                    }
+                    _ => std::process::exit(0),
+                }
             }
         };
 
-        if let Some(val) = run_repl_expr::<T>(&mut repl, input.trim(), args.timings) {
+        if let Some(val) = run_repl_expr::<T>(&mut repl, input.trim(), args.timings, args.verbose) {
             println!("{val}");
         }
 
@@ -140,9 +158,14 @@ fn start_repl_loop<T: Eval>(args: Args, repl_mode: ReplMode) {
     }
 }
 
-fn run_repl_expr<T: Eval>(env: &mut T, math_expr: &str, do_timings: bool) -> Option<f64> {
+fn run_repl_expr<T: Eval>(
+    env: &mut T,
+    math_expr: &str,
+    do_timings: bool,
+    verbose: bool,
+) -> Option<f64> {
     let mut full_timings = Timings::start();
-    let (ops, timings) = into_ops(math_expr)?;
+    let (ops, timings) = into_ops(math_expr, verbose)?;
     full_timings.append(timings, "Init");
 
     let (value, timings) = env.eval(ops).unwrap();
