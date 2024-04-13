@@ -12,6 +12,9 @@ pub enum MathToken {
     Close(usize),
     Exp(usize),
     Num(usize, f64),
+    Id(usize, char),
+    Delim(usize),
+    Eq(usize),
 }
 
 impl MathToken {
@@ -39,6 +42,9 @@ impl MathToken {
                 '^' => Some(MathToken::Exp(current_idx)),
                 '(' => Some(MathToken::Open(current_idx)),
                 ')' => Some(MathToken::Close(current_idx)),
+                ',' => Some(MathToken::Delim(current_idx)),
+                '=' => Some(MathToken::Eq(current_idx)),
+                'A'..='Z' | 'a'..='z' => Some(MathToken::Id(current_idx, current)),
                 _ => None,
             } {
                 input.remove(0);
@@ -71,6 +77,9 @@ impl MathToken {
             | MathToken::Exp(x)
             | MathToken::Open(x)
             | MathToken::Close(x)
+            | MathToken::Id(x, _)
+            | MathToken::Delim(x)
+            | MathToken::Eq(x)
             | MathToken::Num(x, _) => x,
         }
     }

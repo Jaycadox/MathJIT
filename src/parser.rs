@@ -13,6 +13,19 @@ pub struct MathParser {
     original_string: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub args: Vec<char>,
+    pub body: ops::MathOp,
+}
+
+#[derive(Debug)]
+pub enum ParseOutput {
+    Body(ops::MathOp),
+    Functions(Vec<Function>),
+}
+
 impl MathParser {
     pub fn new(input: &str) -> Result<Self> {
         let tokens = tokenizer::MathToken::try_new(input.to_string())?;
@@ -42,10 +55,38 @@ impl MathParser {
         Some(self.tokens.remove(0))
     }
 
+    fn parse_primary_func_call(&mut self) -> Result<Option<ops::MathOp>> {
+        let mut name_buf = String::new();
+        let mut args = vec![];
+        while let Some(tokenizer::MathToken::Id(_, chr)) = self.peek() {
+            name_buf.push(*chr);
+            self.pop();
+        }
+
+        let Some(tokenizer::MathToken::Open(_)) = self.peek() else {
+            return Ok(None);
+        };
+        self.pop();
+
+        while !matches!(self.peek(), Some(tokenizer::MathToken::Close(_))) {
+            let arg = self.parse_expr()?;
+            args.push(arg);
+            if let Some(tokenizer::MathToken::Delim(_)) = self.peek() {
+                self.pop();
+            }
+        }
+        self.pop();
+
+        Ok(Some(ops::MathOp::Call {
+            name: name_buf,
+            args,
+        }))
+    }
+
     fn parse_primary(&mut self) -> Result<ops::MathOp> {
         if let Some(tokenizer::MathToken::Sub(_)) = self.peek() {
             self.pop();
-            return Ok(ops::MathOp::Neg(Box::new(self.parse()?)));
+            return Ok(ops::MathOp::Neg(Box::new(self.parse_inner_func()?)));
         }
         if let Some(tokenizer::MathToken::Open(start)) = self.peek() {
             let start = *start;
@@ -73,7 +114,7 @@ impl MathParser {
                 return Err(anyhow!("brackets not balanced{error}"));
             }
             let mut parser = Self::from_tokens(&self.original_string, tok_list);
-            return parser.parse().with_context(|| {
+            return parser.parse_inner_func().with_context(|| {
                 let error = util::error_message(&self.original_string, start, end);
                 anyhow!("while evaluating brackets{error}")
             });
@@ -90,6 +131,16 @@ impl MathParser {
                 return Ok(ops::MathOp::Num(x));
             }
             panic!("Should never happen {bb:?}");
+        } else if let Some(tokenizer::MathToken::Id(_, name)) = self.peek() {
+            let name = *name;
+            let before = self.tokens.clone();
+
+            if let Some(call) = self.parse_primary_func_call()? {
+                return Ok(call);
+            }
+            self.tokens = before;
+            self.pop();
+            return Ok(ops::MathOp::Arg(name));
         }
         let pos = self.peek().map_or(
             self.original_string.len() - 1,
@@ -181,7 +232,7 @@ impl MathParser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<ops::MathOp> {
+    fn parse_inner_func(&mut self) -> Result<ops::MathOp> {
         if self.tokens.is_empty() {
             return Err(anyhow!("no input provided"));
         }
@@ -193,6 +244,60 @@ impl MathParser {
             return Err(anyhow!("unexpected sequence{msg}"));
         }
         out
+    }
+
+    pub fn parse(&mut self) -> Result<ParseOutput> {
+        let save = self.tokens.clone();
+        if let Some(func) = self.parse_full_func()? {
+            return Ok(func);
+        }
+        self.tokens = save;
+
+        Ok(ParseOutput::Body(self.parse_inner_func()?))
+    }
+
+    fn parse_full_func(&mut self) -> Result<Option<ParseOutput>> {
+        if let Some(tokenizer::MathToken::Id(_, name)) = self.peek() {
+            let name = name.to_string();
+            self.pop();
+            if let Some(tokenizer::MathToken::Open(_)) = self.peek() {
+                let mut args = vec![];
+                self.pop();
+                while let Some(tokenizer::MathToken::Id(_, arg_name)) = self.peek() {
+                    args.push(*arg_name);
+                    self.pop();
+                    match self.peek() {
+                        Some(tokenizer::MathToken::Delim(_)) => {
+                            self.pop();
+                        }
+                        Some(tokenizer::MathToken::Close(_)) => {
+                            break;
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "unexpected token in argument list, wanted close bracket or comma"
+                            ))
+                        }
+                    }
+                }
+
+                // TODO: args
+                if let Some(tokenizer::MathToken::Close(_)) = self.peek() {
+                    self.pop();
+                    if let Some(tokenizer::MathToken::Eq(_)) = self.peek() {
+                        self.pop();
+                        let inner_func = self.parse_inner_func()?;
+                        let func = Function {
+                            name,
+                            args,
+                            body: inner_func,
+                        };
+                        return Ok(Some(ParseOutput::Functions(vec![func])));
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -208,6 +313,9 @@ impl Display for MathParser {
                 tokenizer::MathToken::Exp(_) => " ^ ".to_string(),
                 tokenizer::MathToken::Open(_) => "(".to_string(),
                 tokenizer::MathToken::Close(_) => ")".to_string(),
+                tokenizer::MathToken::Id(_, x) => x.to_string(),
+                tokenizer::MathToken::Delim(_) => ", ".to_string(),
+                tokenizer::MathToken::Eq(_) => " = ".to_string(),
                 tokenizer::MathToken::Num(_, x) => format!("{x}"),
             });
         }

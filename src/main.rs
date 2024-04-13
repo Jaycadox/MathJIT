@@ -7,7 +7,7 @@ mod util;
 
 use anyhow::anyhow;
 use eval::Eval;
-use ops::MathOp;
+use parser::ParseOutput;
 use std::{fmt::Display, io::Write, str::FromStr};
 use timings::Timings;
 
@@ -61,7 +61,7 @@ impl FromStr for Mode {
     }
 }
 
-fn into_ops(math_expr: &str) -> Option<(MathOp, Timings)> {
+fn into_ops(math_expr: &str) -> Option<(ParseOutput, Timings)> {
     let mut timings = Timings::start();
     let mut parser = match parser::MathParser::new(math_expr) {
         Ok(x) => x,
@@ -145,10 +145,16 @@ fn run_repl_expr<T: Eval>(env: &mut T, math_expr: &str, do_timings: bool) -> Opt
     let (ops, timings) = into_ops(math_expr)?;
     full_timings.append(timings, "Init");
 
-    let (value, timings) = env.eval(&ops).unwrap();
+    let (value, timings) = env.eval(ops).unwrap();
     full_timings.append(timings, "Eval");
     if do_timings {
         println!("{}", full_timings.report());
     }
-    Some(value)
+    match value {
+        eval::EvalResponse::Ok => {
+            println!("Ok");
+            None
+        }
+        eval::EvalResponse::Value(value) => Some(value),
+    }
 }
