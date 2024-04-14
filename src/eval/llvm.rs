@@ -1,10 +1,14 @@
+use std::collections::HashMap;
+
 use inkwell::{
+    attributes::Attribute,
     builder::Builder,
     context::Context,
     execution_engine::ExecutionEngine,
     intrinsics::Intrinsic,
     memory_buffer::MemoryBuffer,
     module::Module,
+    passes::PassBuilderOptions,
     targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
     values::{FloatValue, FunctionValue},
     OptimizationLevel,
@@ -16,7 +20,10 @@ use crate::{
     timings::Timings,
 };
 
-use super::{Eval, EvalResponse};
+use super::{
+    intrinsic::{self, IntrinsicFunction},
+    Eval, EvalResponse,
+};
 
 pub struct LlvmJit {
     pub verbose: bool,
@@ -30,16 +37,23 @@ pub struct LlvmJit {
 type EvalFunc = unsafe extern "C" fn() -> f64;
 
 pub struct CodeGen<'a> {
-    context: &'a Context,
-    module: Module<'a>,
-    builder: Builder<'a>,
+    pub context: &'a Context,
+    pub module: Module<'a>,
+    pub builder: Builder<'a>,
     execution_engine: ExecutionEngine<'a>,
+    intrinsics: HashMap<&'static str, Box<dyn IntrinsicFunction>>,
+    pub functions: &'a [Function],
 }
 
 pub struct FunctionGen<'a, 'b> {
-    _cg: &'b CodeGen<'a>,
-    func: &'b Function,
-    llvm_func: FunctionValue<'a>,
+    pub cg: &'b CodeGen<'a>,
+    pub func: &'b Function,
+    pub llvm_func: FunctionValue<'a>,
+}
+
+enum FunctionKind<'a> {
+    Normal(FunctionValue<'a>),
+    Intrinsic(Box<dyn IntrinsicFunction>),
 }
 
 impl<'a> CodeGen<'a> {
@@ -47,11 +61,44 @@ impl<'a> CodeGen<'a> {
         let f64_type = self.context.f64_type();
         let fn_type = f64_type.fn_type(&vec![f64_type.into(); ops.args.len()][..], false);
         let function = self.module.add_function(&ops.name, fn_type, None);
+
+        let nofree = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("nofree"), 0);
+        let nocallback = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("nocallback"), 0);
+        let nounwind = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("nounwind"), 0);
+        let speculatable = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("speculatable"), 0);
+        let willreturn = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("willreturn"), 0);
+        let alwaysinline = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("alwaysinline"), 0);
+        let hot = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("hot"), 0);
+        let inlinehint = self
+            .context
+            .create_enum_attribute(Attribute::get_named_enum_kind_id("inlinehint"), 0);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, nofree);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, nocallback);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, nounwind);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, speculatable);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, willreturn);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, alwaysinline);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, hot);
+        function.add_attribute(inkwell::attributes::AttributeLoc::Function, inlinehint);
         let basic_block = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(basic_block);
 
         let gen = FunctionGen {
-            _cg: self,
+            cg: self,
             func: ops,
             llvm_func: function,
         };
@@ -59,10 +106,11 @@ impl<'a> CodeGen<'a> {
         self.builder
             .build_return(Some(&self.build_block(&ops.body, &gen)))
             .expect("Failed to build return");
+
         Some(())
     }
 
-    fn build_block(&self, ops: &MathOp, gen: &FunctionGen<'a, '_>) -> FloatValue<'a> {
+    pub fn build_block(&self, ops: &MathOp, gen: &FunctionGen<'a, '_>) -> FloatValue<'a> {
         match ops {
             MathOp::Num(x) => self.context.f64_type().const_float(*x),
             MathOp::Neg(x) => self
@@ -102,55 +150,29 @@ impl<'a> CodeGen<'a> {
                 )
                 .expect("Failed to div floats"),
             MathOp::Exp { lhs, rhs } => {
-                let pow_intrinsic =
-                    Intrinsic::find("llvm.pow.f64").expect("Failed to find llvm.pow.f64 intrinsic");
-                let pow_fn = pow_intrinsic
-                    .get_declaration(
-                        &self.module,
-                        &[
-                            self.context.f64_type().into(),
-                            self.context.f64_type().into(),
-                        ],
-                    )
-                    .expect("Failed to get llvm.pow.f64 declaration");
-                let call = self
-                    .builder
-                    .build_call(
-                        pow_fn,
-                        &[
-                            self.build_block(lhs, gen).into(),
-                            self.build_block(rhs, gen).into(),
-                        ],
-                        "powf call",
-                    )
-                    .expect("Failed to call powf");
-                let ret = call
-                    .try_as_basic_value()
-                    .left()
-                    .expect("Could not find left value")
-                    .into_float_value();
-                ret
+                let lhs = *lhs.clone();
+                let rhs = *rhs.clone();
+                self.call_llvm_intrinsic(gen, "llvm.pow.f64", &[lhs, rhs])
             }
-            MathOp::Call { name, args } => {
-                let cfunc = self
-                    .module
-                    .get_function(name)
-                    .expect("Could not find function");
-                let fn_args = args
-                    .iter()
-                    .map(|x| self.build_block(x, gen).into())
-                    .collect::<Vec<_>>();
-                let fn_call = self
-                    .builder
-                    .build_call(cfunc, &fn_args[..], "func call")
-                    .expect("Failed to call");
-                let ret = fn_call
-                    .try_as_basic_value()
-                    .left()
-                    .expect("Could not find left value")
-                    .into_float_value();
-                ret
-            }
+            MathOp::Call { name, args } => match self.get_function(name) {
+                FunctionKind::Intrinsic(func) => func.gen_jit(gen, args),
+                FunctionKind::Normal(cfunc) => {
+                    let fn_args = args
+                        .iter()
+                        .map(|x| self.build_block(x, gen).into())
+                        .collect::<Vec<_>>();
+                    let fn_call = self
+                        .builder
+                        .build_call(cfunc, &fn_args[..], "func call")
+                        .expect("Failed to call");
+                    let ret = fn_call
+                        .try_as_basic_value()
+                        .left()
+                        .expect("Could not find left value")
+                        .into_float_value();
+                    ret
+                }
+            },
             MathOp::Arg(n) => {
                 if let Some((index, _)) = gen.func.args.iter().enumerate().find(|x| x.1 == n) {
                     let arg = gen
@@ -185,6 +207,45 @@ impl<'a> CodeGen<'a> {
             .expect("Failed to get memory buffer");
         let asm = String::from_utf8_lossy(mem_buf.as_slice());
         asm.to_string()
+    }
+
+    fn get_function(&self, name: &str) -> FunctionKind<'a> {
+        if let Some(func) = self.module.get_function(name) {
+            return FunctionKind::Normal(func);
+        } else if let Some(func) = self.intrinsics.get(name) {
+            return FunctionKind::Intrinsic(func.replicate());
+        }
+        panic!("could not find function {name}")
+    }
+
+    pub fn call_llvm_intrinsic(
+        &self,
+        gen: &FunctionGen<'a, '_>,
+        name: &str,
+        args: &[MathOp],
+    ) -> FloatValue<'a> {
+        let pow_intrinsic =
+            Intrinsic::find(name).unwrap_or_else(|| panic!("Failed to find {name} intrinsic"));
+        let pow_fn = pow_intrinsic
+            .get_declaration(
+                &self.module,
+                &vec![self.context.f64_type().into(); args.len()],
+            )
+            .unwrap_or_else(|| panic!("Failed to get {name} declaration"));
+        let call_args = args
+            .iter()
+            .map(|x| self.build_block(x, gen).into())
+            .collect::<Vec<_>>();
+        let call = self
+            .builder
+            .build_call(pow_fn, &call_args, "call")
+            .expect("Failed to call");
+        let ret = call
+            .try_as_basic_value()
+            .left()
+            .expect("Could not find left value")
+            .into_float_value();
+        ret
     }
 }
 
@@ -223,6 +284,8 @@ impl LlvmJit {
             module,
             builder: self.context.create_builder(),
             execution_engine,
+            intrinsics: intrinsic::standard_intrinsics(),
+            functions: &self.functions,
         };
         codegen
     }
@@ -248,11 +311,7 @@ impl Eval for LlvmJit {
     }
 
     fn eval(&mut self, ops: ParseOutput) -> Option<(EvalResponse, Timings)> {
-        if self.verbose {
-            println!("--- AST ---\n{ops:?}");
-        }
-
-        self.functions.retain(|x| !x.name.starts_with("__repl__"));
+        self.functions.retain(|x| x.name != "_repl");
         let (functions, exec_last) = match ops {
             ParseOutput::Body(ops) => (
                 vec![Function {
@@ -288,6 +347,49 @@ impl Eval for LlvmJit {
             })
             .map(|x| self.compile_function(&codegen, x, &mut timings))
             .collect::<Option<Vec<()>>>()?;
+
+        let triple = TargetMachine::get_default_triple();
+        let cpu = TargetMachine::get_host_cpu_name().to_string();
+        let features = TargetMachine::get_host_cpu_features().to_string();
+
+        let target = Target::from_triple(&triple).unwrap();
+        let machine = target
+            .create_target_machine(
+                &triple,
+                &cpu,
+                &features,
+                OptimizationLevel::Aggressive,
+                RelocMode::Default,
+                CodeModel::JITDefault,
+            )
+            .unwrap();
+        let passes: &[&str] = &[
+            "instcombine",
+            "lcssa",
+            "jump-threading",
+            "loop-reduce",
+            "loop-rotate",
+            "loop-simplify",
+            "loop-unroll",
+            "sroa",
+            "sccp",
+            "sink",
+            "reassociate",
+            "gvn",
+            "simplifycfg",
+            "mem2reg",
+        ];
+        let pass_cfg = PassBuilderOptions::create();
+        pass_cfg.set_loop_interleaving(true);
+        pass_cfg.set_loop_slp_vectorization(true);
+        pass_cfg.set_loop_unrolling(true);
+        pass_cfg.set_loop_vectorization(true);
+        pass_cfg.set_merge_functions(true);
+
+        codegen
+            .module
+            .run_passes(&passes.join(","), &machine, pass_cfg)
+            .unwrap();
 
         if self.verbose {
             println!("--- LLVM IR ---");

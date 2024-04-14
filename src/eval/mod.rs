@@ -1,6 +1,7 @@
 use crate::{parser::ParseOutput, timings::Timings};
 
 pub mod ast_interpret;
+pub mod intrinsic;
 pub mod llvm;
 
 pub enum EvalResponse {

@@ -1,61 +1,69 @@
-use std::{rc::Rc, sync::RwLock};
-
 use crate::{
     ops::MathOp,
     parser::{Function, ParseOutput},
     timings::Timings,
 };
 
-use super::{Eval, EvalResponse};
+use super::{
+    intrinsic::{self},
+    Eval, EvalResponse,
+};
 
 pub struct AstInterpreter {
-    functions: Vec<Function>,
-    arg_frames: Rc<RwLock<Vec<Vec<f64>>>>,
+    pub functions: Vec<Function>,
 }
 
 impl AstInterpreter {
-    fn inner_eval(&self, ops: &MathOp, func: &Function) -> Option<f64> {
+    pub fn eval_func(&self, ops: &MathOp, func: &Function, current_args: &[f64]) -> Option<f64> {
         Some(match ops {
-            MathOp::Add { lhs, rhs } => self.inner_eval(lhs, func)? + self.inner_eval(rhs, func)?,
-            MathOp::Sub { lhs, rhs } => self.inner_eval(lhs, func)? - self.inner_eval(rhs, func)?,
-            MathOp::Mul { lhs, rhs } => self.inner_eval(lhs, func)? * self.inner_eval(rhs, func)?,
-            MathOp::Div { lhs, rhs } => self.inner_eval(lhs, func)? / self.inner_eval(rhs, func)?,
+            MathOp::Add { lhs, rhs } => {
+                self.eval_func(lhs, func, current_args)?
+                    + self.eval_func(rhs, func, current_args)?
+            }
+            MathOp::Sub { lhs, rhs } => {
+                self.eval_func(lhs, func, current_args)?
+                    - self.eval_func(rhs, func, current_args)?
+            }
+            MathOp::Mul { lhs, rhs } => {
+                self.eval_func(lhs, func, current_args)?
+                    * self.eval_func(rhs, func, current_args)?
+            }
+            MathOp::Div { lhs, rhs } => {
+                self.eval_func(lhs, func, current_args)?
+                    / self.eval_func(rhs, func, current_args)?
+            }
             MathOp::Exp { lhs, rhs } => self
-                .inner_eval(lhs, func)?
-                .powf(self.inner_eval(rhs, func)?),
+                .eval_func(lhs, func, current_args)?
+                .powf(self.eval_func(rhs, func, current_args)?),
             MathOp::Num(x) => *x,
-            MathOp::Neg(x) => -self.inner_eval(x, func)?,
+            MathOp::Neg(x) => -self.eval_func(x, func, current_args)?,
             MathOp::Call { name, args } => {
-                // Fill function frame with evaluated arguments
-                let mut frame = Vec::new();
-                for arg in args {
-                    let val = self.inner_eval(arg, func)?;
-                    frame.push(val);
-                }
+                let Some(func) = self.functions.iter().find(|x| x.name == *name) else {
+                    if let Some(ifunc) = intrinsic::standard_intrinsics().get(&name[..]) {
+                        return Some(
+                            ifunc.eval_interpreter(
+                                self,
+                                args.iter()
+                                    .map(|x| self.eval_func(x, func, current_args))
+                                    .collect::<Option<Vec<_>>>()?,
+                            ),
+                        );
+                    }
+                    panic!("Could not find function")
+                };
 
-                // Push function frame and call function
-                self.arg_frames.write().unwrap().push(frame);
-                let func = self
-                    .functions
-                    .iter()
-                    .find(|x| x.name == *name)
-                    .expect("Could not find function");
-                let val = self.inner_eval(&func.body, func)?;
-
-                // Pop function frame after function call
-                self.arg_frames.write().unwrap().pop();
-                val
+                self.eval_func(
+                    &func.body,
+                    func,
+                    &args
+                        .iter()
+                        .map(|x| self.eval_func(x, func, current_args))
+                        .collect::<Option<Vec<_>>>()?,
+                )?
             }
             MathOp::Arg(n) => {
                 if let Some((index, _)) = func.args.iter().enumerate().find(|x| x.1 == n) {
-                    *self
-                        .arg_frames
-                        .read()
-                        .unwrap()
-                        .last()
-                        .expect("Could not find function frame")
-                        .get(index)
-                        .expect("Could not find argument")
+                    *current_args.get(index).expect("Could not find argument")
                 } else {
                     panic!("Argument specified in function body was not passed in function call")
                 }
@@ -68,23 +76,21 @@ impl Eval for AstInterpreter {
     fn new(verbose: bool) -> Self {
         let _ = verbose;
 
-        Self {
-            functions: vec![],
-            arg_frames: Rc::new(RwLock::new(vec![])),
-        }
+        Self { functions: vec![] }
     }
 
     fn eval(&mut self, ops: ParseOutput) -> Option<(super::EvalResponse, Timings)> {
         let timings = Timings::start();
         match ops {
             ParseOutput::Body(ops) => Some((
-                EvalResponse::Value(self.inner_eval(
+                EvalResponse::Value(self.eval_func(
                     &ops,
                     &Function {
                         name: "".to_string(),
                         args: vec![],
                         body: ops.clone(),
                     },
+                    &[],
                 )?),
                 timings,
             )),

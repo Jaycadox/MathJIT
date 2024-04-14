@@ -36,7 +36,7 @@ impl MathParser {
         })
     }
 
-    pub fn tokens(&self) -> &[tokenizer::MathToken] {
+    pub fn original_tokens(&self) -> &[tokenizer::MathToken] {
         &self.original_tokens
     }
 

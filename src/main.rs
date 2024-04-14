@@ -77,7 +77,7 @@ fn into_ops(math_expr: &str, verbose: bool) -> Option<(ParseOutput, Timings)> {
 
     if verbose {
         println!("--- Tokenized --");
-        println!("{:?}", parser.tokens());
+        println!("{:?}", parser.original_tokens());
     }
 
     timings.lap("Tokenizer");
