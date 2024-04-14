@@ -278,9 +278,7 @@ impl MathParser {
                             break;
                         }
                         _ => {
-                            return Err(anyhow!(
-                                "unexpected token in argument list, wanted close bracket or comma"
-                            ))
+                            return Ok(None);
                         }
                     }
                 }
