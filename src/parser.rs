@@ -7,7 +7,7 @@ use anyhow::Context;
 use anyhow::{anyhow, Result};
 
 #[derive(Debug)]
-pub struct MathParser {
+pub struct Parser {
     tokens: Vec<tokenizer::MathToken>,
     original_tokens: Vec<tokenizer::MathToken>,
     original_string: String,
@@ -26,7 +26,7 @@ pub enum ParseOutput {
     Functions(Vec<Function>),
 }
 
-impl MathParser {
+impl Parser {
     pub fn new(input: &str) -> Result<Self> {
         let tokens = tokenizer::MathToken::try_new(input.to_string())?;
         Ok(Self {
@@ -283,7 +283,6 @@ impl MathParser {
                     }
                 }
 
-                // TODO: args
                 if let Some(tokenizer::MathToken::Close(_)) = self.peek() {
                     self.pop();
                     if let Some(tokenizer::MathToken::Eq(_)) = self.peek() {
@@ -303,7 +302,7 @@ impl MathParser {
     }
 }
 
-impl Display for MathParser {
+impl Display for Parser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut out_buf = String::new();
         for tok in &self.original_tokens {

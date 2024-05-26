@@ -6,7 +6,7 @@ use crate::{
 
 use super::{
     intrinsic::{self},
-    Eval, EvalResponse,
+    Eval, Response,
 };
 
 pub struct AstInterpreter {
@@ -79,14 +79,14 @@ impl Eval for AstInterpreter {
         Self { functions: vec![] }
     }
 
-    fn eval(&mut self, ops: ParseOutput) -> Option<(super::EvalResponse, Timings)> {
+    fn eval(&mut self, ops: ParseOutput) -> Option<(super::Response, Timings)> {
         let timings = Timings::start();
         match ops {
             ParseOutput::Body(ops) => Some((
-                EvalResponse::Value(self.eval_func(
+                Response::Value(self.eval_func(
                     &ops,
                     &Function {
-                        name: "".to_string(),
+                        name: String::new(),
                         args: vec![],
                         body: ops.clone(),
                     },
@@ -102,7 +102,7 @@ impl Eval for AstInterpreter {
                         self.functions.push(func);
                     }
                 }
-                Some((EvalResponse::Ok, timings))
+                Some((Response::Ok, timings))
             }
         }
     }

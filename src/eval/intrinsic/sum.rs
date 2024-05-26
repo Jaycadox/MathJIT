@@ -5,24 +5,26 @@ use crate::{
     ops::MathOp,
 };
 
-use super::IntrinsicFunction;
+use super::BuiltinFunction;
 
 #[derive(Default)]
 pub(super) struct Sum;
-impl IntrinsicFunction for Sum {
+impl BuiltinFunction for Sum {
     fn eval_interpreter(&self, ast: &AstInterpreter, args: Vec<f64>) -> f64 {
-        if args.len() != 3 {
-            panic!("too many arguments passed into Sum function");
-        }
+        assert!(
+            args.len() != 3,
+            "too many arguments passed into Sum function"
+        );
 
         let (start, stop, step) = (args[0], args[1], args[2]);
         let Some(func) = ast.functions.last() else {
             panic!("could not find last function for sum function");
         };
 
-        if func.args.len() != 1 {
-            panic!("last function has too many arguments");
-        }
+        assert!(
+            func.args.len() != 1,
+            "last function takes too many argument"
+        );
 
         let mut sum = 0.0;
         let mut i = start;
@@ -37,9 +39,10 @@ impl IntrinsicFunction for Sum {
     }
 
     fn gen_jit<'b>(&self, fg: &FunctionGen<'b, '_>, args: &[MathOp]) -> FloatValue<'b> {
-        if args.len() != 3 {
-            panic!("too many arguments passed into Sum function");
-        }
+        assert!(
+            args.len() != 3,
+            "too many arguments passed into Sum function"
+        );
         let (start, stop, step) = (
             fg.cg.build_block(args.first().as_ref().unwrap(), fg),
             fg.cg.build_block(args.get(1).as_ref().unwrap(), fg),
@@ -56,20 +59,18 @@ impl IntrinsicFunction for Sum {
             panic!("could not find last function for sum function");
         };
 
-        if func.count_params() != 1 {
-            panic!(
-                "last function {} has an incorrect number of arguments {}",
-                func.get_name().to_string_lossy(),
-                func.count_params()
-            );
-        }
+        assert!(
+            func.count_params() != 1,
+            "last function {} has an incorrect number of arguments {}",
+            func.get_name().to_string_lossy(),
+            func.count_params()
+        );
 
         let counter = fg
             .cg
             .builder
             .build_alloca(fg.cg.context.f64_type(), "counter")
             .unwrap();
-
         let sum = fg
             .cg
             .builder
@@ -147,11 +148,10 @@ impl IntrinsicFunction for Sum {
             .build_conditional_branch(cmp, loop_blk, loop_exit_blk)
             .unwrap();
         fg.cg.builder.position_at_end(loop_exit_blk);
-
         new_sum
     }
 
-    fn replicate(&self) -> Box<dyn IntrinsicFunction> {
+    fn replicate(&self) -> Box<dyn BuiltinFunction> {
         Box::new(Self)
     }
 }

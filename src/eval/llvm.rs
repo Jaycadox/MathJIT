@@ -21,11 +21,11 @@ use crate::{
 };
 
 use super::{
-    intrinsic::{self, IntrinsicFunction},
-    Eval, EvalResponse,
+    intrinsic::{self, BuiltinFunction},
+    Eval, Response,
 };
 
-pub struct LlvmJit {
+pub struct Jit {
     pub verbose: bool,
     pub compile_ms: f64,
     pub run_ms: f64,
@@ -41,7 +41,7 @@ pub struct CodeGen<'a> {
     pub module: Module<'a>,
     pub builder: Builder<'a>,
     execution_engine: ExecutionEngine<'a>,
-    intrinsics: HashMap<&'static str, Box<dyn IntrinsicFunction>>,
+    intrinsics: HashMap<&'static str, Box<dyn BuiltinFunction>>,
     pub functions: &'a [Function],
 }
 
@@ -53,11 +53,11 @@ pub struct FunctionGen<'a, 'b> {
 
 enum FunctionKind<'a> {
     Normal(FunctionValue<'a>),
-    Intrinsic(Box<dyn IntrinsicFunction>),
+    Intrinsic(Box<dyn BuiltinFunction>),
 }
 
 impl<'a> CodeGen<'a> {
-    fn compile(&self, ops: &Function, _verbose: bool) -> Option<()> {
+    fn compile(&self, ops: &Function, _verbose: bool) {
         let f64_type = self.context.f64_type();
         let fn_type = f64_type.fn_type(&vec![f64_type.into(); ops.args.len()][..], false);
         let function = self.module.add_function(&ops.name, fn_type, None);
@@ -106,8 +106,6 @@ impl<'a> CodeGen<'a> {
         self.builder
             .build_return(Some(&self.build_block(&ops.body, &gen)))
             .expect("Failed to build return");
-
-        Some(())
     }
 
     pub fn build_block(&self, ops: &MathOp, gen: &FunctionGen<'a, '_>) -> FloatValue<'a> {
@@ -177,7 +175,7 @@ impl<'a> CodeGen<'a> {
                 if let Some((index, _)) = gen.func.args.iter().enumerate().find(|x| x.1 == n) {
                     let arg = gen
                         .llvm_func
-                        .get_nth_param(index as u32)
+                        .get_nth_param(u32::try_from(index).unwrap())
                         .expect("Could not get paramter")
                         .into_float_value();
                     return arg;
@@ -249,19 +247,10 @@ impl<'a> CodeGen<'a> {
     }
 }
 
-impl LlvmJit {
-    fn compile_function(
-        &self,
-        codegen: &CodeGen,
-        func: &Function,
-        timings: &mut Timings,
-    ) -> Option<()> {
-        codegen
-            .compile(func, self.verbose)
-            .expect("Failed to JIT compile");
+impl Jit {
+    fn compile_function(&self, codegen: &CodeGen, func: &Function, timings: &mut Timings) {
+        codegen.compile(func, self.verbose);
         timings.lap(&format!("Codegen({})", func.name));
-
-        Some(())
     }
 
     fn create_codegen(&self, cached_module: &Option<Vec<u8>>) -> CodeGen {
@@ -291,7 +280,7 @@ impl LlvmJit {
     }
 }
 
-impl Eval for LlvmJit {
+impl Eval for Jit {
     fn new(verbose: bool) -> Self {
         let config = InitializationConfig {
             asm_printer: true,
@@ -310,7 +299,7 @@ impl Eval for LlvmJit {
         }
     }
 
-    fn eval(&mut self, ops: ParseOutput) -> Option<(EvalResponse, Timings)> {
+    fn eval(&mut self, ops: ParseOutput) -> Option<(Response, Timings)> {
         self.functions.retain(|x| x.name != "_repl");
         let (functions, exec_last) = match ops {
             ParseOutput::Body(ops) => (
@@ -329,7 +318,7 @@ impl Eval for LlvmJit {
         for func in functions {
             if let Some(item) = self.functions.iter_mut().find(|x| x.name == func.name) {
                 *item = func;
-                changed_functions.push(item.name.to_owned());
+                changed_functions.push(item.name.clone());
             } else {
                 self.functions.push(func);
             }
@@ -345,8 +334,7 @@ impl Eval for LlvmJit {
                 changed_functions.contains(&x.name)
                     || codegen.module.get_function(&x.name).is_none()
             })
-            .map(|x| self.compile_function(&codegen, x, &mut timings))
-            .collect::<Option<Vec<()>>>()?;
+            .for_each(|x| self.compile_function(&codegen, x, &mut timings));
 
         let triple = TargetMachine::get_default_triple();
         let cpu = TargetMachine::get_host_cpu_name().to_string();
@@ -409,7 +397,7 @@ impl Eval for LlvmJit {
             timings.lap("LLVMCompile");
             let val = unsafe { func() };
             timings.lap("Exec");
-            return Some((EvalResponse::Value(val), timings));
+            return Some((Response::Value(val), timings));
         }
 
         let cached = codegen.module.write_bitcode_to_memory().as_slice().to_vec();
@@ -425,6 +413,6 @@ impl Eval for LlvmJit {
             self.cached_module = None;
         }
 
-        Some((EvalResponse::Ok, timings))
+        Some((Response::Ok, timings))
     }
 }

@@ -28,7 +28,7 @@ impl Timings {
         }
 
         for (label, time) in other.points {
-            self.points.push((format!("{prefix}/{label}"), time))
+            self.points.push((format!("{prefix}/{label}"), time));
         }
     }
 

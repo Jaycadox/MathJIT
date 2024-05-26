@@ -6,17 +6,17 @@ use crate::ops::MathOp;
 
 use super::{ast_interpret::AstInterpreter, llvm::FunctionGen};
 
-pub trait IntrinsicFunction {
+pub trait BuiltinFunction {
     fn eval_interpreter(&self, ast: &AstInterpreter, args: Vec<f64>) -> f64;
     fn gen_jit<'b>(&self, fg: &FunctionGen<'b, '_>, args: &[MathOp]) -> FloatValue<'b>;
-    fn replicate(&self) -> Box<dyn IntrinsicFunction>;
+    fn replicate(&self) -> Box<dyn BuiltinFunction>;
 }
 
 mod sqrt;
 mod sum;
 mod trig;
-pub fn standard_intrinsics() -> HashMap<&'static str, Box<dyn IntrinsicFunction>> {
-    let mut funcs = HashMap::<&'static str, Box<dyn IntrinsicFunction>>::new();
+pub fn standard_intrinsics() -> HashMap<&'static str, Box<dyn BuiltinFunction>> {
+    let mut funcs = HashMap::<&'static str, Box<dyn BuiltinFunction>>::new();
     funcs.insert("sqrt", Box::new(sqrt::Sqrt));
     funcs.insert("pi", Box::new(trig::Pi));
     funcs.insert("sin", Box::new(trig::Sin));

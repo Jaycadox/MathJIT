@@ -12,7 +12,7 @@ use rustyline::DefaultEditor;
 use std::{fmt::Display, str::FromStr};
 use timings::Timings;
 
-use crate::eval::{ast_interpret::AstInterpreter, llvm::LlvmJit};
+use crate::eval::{ast_interpret::AstInterpreter, llvm::Jit};
 use clap::Parser;
 
 #[derive(clap::Parser, Debug)]
@@ -64,7 +64,7 @@ impl FromStr for Mode {
 
 fn into_ops(math_expr: &str, verbose: bool) -> Option<(ParseOutput, Timings)> {
     let mut timings = Timings::start();
-    let mut parser = match parser::MathParser::new(math_expr) {
+    let mut parser = match parser::Parser::new(math_expr) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("Tokenizer error:");
@@ -95,7 +95,7 @@ fn into_ops(math_expr: &str, verbose: bool) -> Option<(ParseOutput, Timings)> {
 
     if verbose {
         println!("--- AST --");
-        println!("{:?}", ops);
+        println!("{ops:?}");
     }
 
     timings.lap("Parser");
@@ -117,15 +117,15 @@ fn main() {
 
     match args.mode {
         Mode::Interpret => {
-            start_repl_loop::<AstInterpreter>(args, repl_mode);
+            start_repl_loop::<AstInterpreter>(&args, &repl_mode);
         }
         Mode::Jit => {
-            start_repl_loop::<LlvmJit>(args, repl_mode);
+            start_repl_loop::<Jit>(&args, &repl_mode);
         }
     }
 }
 
-fn start_repl_loop<T: Eval>(args: Args, repl_mode: ReplMode) {
+fn start_repl_loop<T: Eval>(args: &Args, repl_mode: &ReplMode) {
     if let ReplMode::Loop = repl_mode {
         println!("MathJIT ({} mode)", args.mode);
     }
@@ -174,10 +174,10 @@ fn run_repl_expr<T: Eval>(
         println!("{}", full_timings.report());
     }
     match value {
-        eval::EvalResponse::Ok => {
+        eval::Response::Ok => {
             println!("Ok");
             None
         }
-        eval::EvalResponse::Value(value) => Some(value),
+        eval::Response::Value(value) => Some(value),
     }
 }
