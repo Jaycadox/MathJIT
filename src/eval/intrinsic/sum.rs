@@ -5,7 +5,7 @@ use crate::{
     ops::MathOp,
 };
 
-use super::BuiltinFunction;
+use super::{BuiltinFunction, BuiltinProto};
 
 #[derive(Default)]
 pub(super) struct Sum;
@@ -23,7 +23,7 @@ impl BuiltinFunction for Sum {
 
         assert!(
             func.args.len() != 1,
-            "last function takes too many argument"
+            "last function takes incorrect arguments"
         );
 
         let mut sum = 0.0;
@@ -153,5 +153,9 @@ impl BuiltinFunction for Sum {
 
     fn replicate(&self) -> Box<dyn BuiltinFunction> {
         Box::new(Self)
+    }
+
+    fn proto(&self) -> BuiltinProto {
+        BuiltinProto { arg_count: 3 }
     }
 }

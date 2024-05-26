@@ -6,10 +6,15 @@ use crate::ops::MathOp;
 
 use super::{ast_interpret::AstInterpreter, llvm::FunctionGen};
 
+pub struct BuiltinProto {
+    pub arg_count: u8,
+}
+
 pub trait BuiltinFunction {
     fn eval_interpreter(&self, ast: &AstInterpreter, args: Vec<f64>) -> f64;
     fn gen_jit<'b>(&self, fg: &FunctionGen<'b, '_>, args: &[MathOp]) -> FloatValue<'b>;
     fn replicate(&self) -> Box<dyn BuiltinFunction>;
+    fn proto(&self) -> BuiltinProto;
 }
 
 mod sqrt;
