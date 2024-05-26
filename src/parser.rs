@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::eval::intrinsic;
 use crate::ops;
 use crate::tokenizer;
 use crate::util;
@@ -67,19 +68,43 @@ impl Parser {
             self.pop();
         }
 
-        let Some(tokenizer::MathToken::Open(_)) = self.peek() else {
+        let Some(tokenizer::MathToken::Open(start)) = self.peek() else {
             return Ok(None);
         };
-        self.pop();
 
-        while !matches!(self.peek(), Some(tokenizer::MathToken::Close(_))) {
-            let arg = self.parse_expr()?;
-            args.push(arg);
-            if let Some(tokenizer::MathToken::Delim(_)) = self.peek() {
-                self.pop();
+        let start = *start;
+        let end;
+        self.pop();
+        loop {
+            match self.peek() {
+                Some(tokenizer::MathToken::Close(pos)) => {
+                    end = *pos;
+                    break;
+                }
+                _ => {
+                    let arg = self.parse_expr()?;
+                    args.push(arg);
+                    if let Some(tokenizer::MathToken::Delim(_)) = self.peek() {
+                        self.pop();
+                    }
+                }
             }
         }
         self.pop();
+
+        // Attempt to perform typechecking given a function proto and the standard intrinsics, note that this is probably not the best place to be doing this.
+
+        let standard_intrinsics = intrinsic::standard_intrinsics();
+        if let Some(intrin) = standard_intrinsics.get(&name_buf[..]) {
+            if intrin.proto().arg_count as usize != args.len() {
+                let error = util::error_message(&self.original_string, start, end);
+                return Err(anyhow!(
+                    "incorrect argument count for '{name_buf}' call, {} provided, {} expected {error}",
+                    args.len(),
+                    intrin.proto().arg_count
+                ));
+            }
+        }
 
         Ok(Some(ops::MathOp::Call {
             name: name_buf,
