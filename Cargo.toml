@@ -16,5 +16,5 @@ anyhow = "1.0.82"
 clap = { version = "4.5.4", features = ["derive"] }
 coloured-strings = "0.1.10"
 comfy-table = { version = "7.1.1", default-features = false }
-inkwell = { version = "0.4.0", features = ["llvm17-0-prefer-dynamic"] }
+inkwell = { version = "0.4.0", features = ["llvm17-0-force-static"] }
 rustyline = { version = "14.0.0", default-features = false }
