@@ -62,7 +62,7 @@ impl FromStr for Mode {
     }
 }
 
-fn into_ops(math_expr: &str, verbose: bool) -> Option<(ParseOutput, Timings)> {
+fn into_ops(math_expr: &str, verbose: bool) -> Option<(Vec<ParseOutput>, Timings)> {
     let mut timings = Timings::start();
     let mut parser = match parser::Parser::new(math_expr) {
         Ok(x) => x,
@@ -166,18 +166,21 @@ fn run_repl_expr<T: Eval>(
 ) -> Option<f64> {
     let mut full_timings = Timings::start();
     let (ops, timings) = into_ops(math_expr, verbose)?;
+    let mut last_response = None;
     full_timings.append(timings, "Init");
-
-    let (value, timings) = env.eval(ops).unwrap();
-    full_timings.append(timings, "Eval");
-    if do_timings {
-        println!("{}", full_timings.report());
-    }
-    match value {
-        eval::Response::Ok => {
-            println!("Ok");
-            None
+    for op in ops {
+        let (value, timings) = env.eval(op).unwrap();
+        full_timings.append(timings, "Eval");
+        if do_timings {
+            println!("{}", full_timings.report());
         }
-        eval::Response::Value(value) => Some(value),
+        last_response = match value {
+            eval::Response::Ok => {
+                println!("Ok");
+                None
+            }
+            eval::Response::Value(value) => Some(value),
+        }
     }
+    last_response
 }

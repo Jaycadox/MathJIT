@@ -11,18 +11,13 @@ use super::{BuiltinFunction, BuiltinProto};
 pub(super) struct Sum;
 impl BuiltinFunction for Sum {
     fn eval_interpreter(&self, ast: &AstInterpreter, args: Vec<f64>) -> f64 {
-        assert!(
-            args.len() != 3,
-            "too many arguments passed into Sum function"
-        );
-
         let (start, stop, step) = (args[0], args[1], args[2]);
         let Some(func) = ast.functions.last() else {
             panic!("could not find last function for sum function");
         };
 
         assert!(
-            func.args.len() != 1,
+            func.args.len() == 1,
             "last function takes incorrect arguments"
         );
 
@@ -40,7 +35,7 @@ impl BuiltinFunction for Sum {
 
     fn gen_jit<'b>(&self, fg: &FunctionGen<'b, '_>, args: &[MathOp]) -> FloatValue<'b> {
         assert!(
-            args.len() != 3,
+            args.len() == 3,
             "too many arguments passed into Sum function"
         );
         let (start, stop, step) = (
@@ -60,7 +55,7 @@ impl BuiltinFunction for Sum {
         };
 
         assert!(
-            func.count_params() != 1,
+            func.count_params() == 1,
             "last function {} has an incorrect number of arguments {}",
             func.get_name().to_string_lossy(),
             func.count_params()

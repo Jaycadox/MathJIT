@@ -267,15 +267,10 @@ impl Parser {
         }
 
         let out = self.parse_expr();
-        if !self.tokens.is_empty() {
-            let idx = self.tokens.remove(0).position();
-            let msg = util::error_message(&self.original_string, idx, idx);
-            return Err(anyhow!("unexpected sequence{msg}"));
-        }
         out
     }
 
-    pub fn parse(&mut self) -> Result<ParseOutput> {
+    fn parse_expression_chain_single(&mut self) -> Result<ParseOutput> {
         let save = self.tokens.clone();
         if let Some(func) = self.parse_full_func()? {
             return Ok(func);
@@ -283,6 +278,18 @@ impl Parser {
         self.tokens = save;
 
         Ok(ParseOutput::Body(self.parse_inner_func()?))
+    }
+
+    pub fn parse(&mut self) -> Result<Vec<ParseOutput>> {
+        let first = self.parse_expression_chain_single()?;
+
+        let mut exprs = vec![first];
+        while matches!(self.peek(), Some(tokenizer::MathToken::Chain(_))) {
+            self.pop();
+            exprs.push(self.parse_expression_chain_single()?);
+        }
+
+        Ok(exprs)
     }
 
     fn parse_full_func(&mut self) -> Result<Option<ParseOutput>> {
@@ -343,6 +350,7 @@ impl Display for Parser {
                 tokenizer::MathToken::Delim(_) => ", ".to_string(),
                 tokenizer::MathToken::Eq(_) => " = ".to_string(),
                 tokenizer::MathToken::Num(_, x) => format!("{x}"),
+                tokenizer::MathToken::Chain(_) => " & ".to_string(),
             });
         }
 

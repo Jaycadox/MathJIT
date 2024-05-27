@@ -15,6 +15,7 @@ pub enum MathToken {
     Id(usize, char),
     Delim(usize),
     Eq(usize),
+    Chain(usize),
 }
 
 impl MathToken {
@@ -44,6 +45,7 @@ impl MathToken {
                 ')' => Some(MathToken::Close(current_idx)),
                 ',' => Some(MathToken::Delim(current_idx)),
                 '=' => Some(MathToken::Eq(current_idx)),
+                '&' => Some(MathToken::Chain(current_idx)),
                 'A'..='Z' | 'a'..='z' => Some(MathToken::Id(current_idx, current)),
                 _ => None,
             } {
@@ -80,7 +82,8 @@ impl MathToken {
             | MathToken::Id(x, _)
             | MathToken::Delim(x)
             | MathToken::Eq(x)
-            | MathToken::Num(x, _) => x,
+            | MathToken::Num(x, _)
+            | MathToken::Chain(x) => x,
         }
     }
 }
