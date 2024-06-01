@@ -289,6 +289,12 @@ impl Parser {
             exprs.push(self.parse_expression_chain_single()?);
         }
 
+        if !self.tokens.is_empty() {
+            let idx = self.tokens.remove(0).position();
+            let msg = util::error_message(&self.original_string, idx, idx);
+            return Err(anyhow!("unexpected sequence{msg}"));
+        }
+
         Ok(exprs)
     }
 
